@@ -1,11 +1,12 @@
 use std::io::{self, BufRead};
 use std::mem::replace;
-type Memory = Vec<u64>;
+use std::env;
+type Memory = Vec<i64>;
 fn create_memory(data: String) -> Memory {
     data.split(",").map(|x| x.parse().unwrap()).collect()
 }
 
-fn intcode(memory: &mut Memory) -> u64 {
+fn intcode(memory: &mut Memory) -> i64 {
     let mut ptr: usize = 0;
     loop {
         if ptr >= memory.len() {
@@ -21,7 +22,7 @@ fn intcode(memory: &mut Memory) -> u64 {
                 let a = memory[ra];
                 let b = memory[rb];
                 replace(&mut memory[rc], a + b);
-                ptr = ptr + 4
+                ptr = ptr + 4;
             },
             2 => {
                 let ra = memory[ptr + 1] as usize;
@@ -30,7 +31,7 @@ fn intcode(memory: &mut Memory) -> u64 {
                 let a = memory[ra];
                 let b = memory[rb];
                 replace(&mut memory[rc], a * b);
-                ptr = ptr + 4
+                ptr = ptr + 4;
             }
             _ => unreachable!()
         }
@@ -45,9 +46,13 @@ fn main() {
         .next()
         .expect("there was no next line")
         .expect("the line could not be read");
+    let args: Vec<String> = env::args().collect();
+    let noun:i64 = args[1].parse().unwrap();
+    let verb:i64 = args[2].parse().unwrap();
+
     let mut memory = create_memory(line);
-    replace(&mut memory[1], 12);
-    replace(&mut memory[2], 2);
+    replace(&mut memory[1], noun);
+    replace(&mut memory[2], verb);
     println!("{}", intcode(&mut memory));
 }
 
