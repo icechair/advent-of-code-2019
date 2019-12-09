@@ -1,11 +1,54 @@
-
-fn create_memory(data: String) -> Vec<u32> {
+use std::io::{self, BufRead};
+use std::mem::replace;
+type Memory = Vec<u64>;
+fn create_memory(data: String) -> Memory {
     data.split(",").map(|x| x.parse().unwrap()).collect()
 }
 
+fn intcode(memory: &mut Memory) -> u64 {
+    let mut ptr: usize = 0;
+    loop {
+        if ptr >= memory.len() {
+            return memory[0];
+        }
+        let opcode = memory[ptr];
+        match opcode {
+            99 => return memory[0],
+            1 => {
+                let ra = memory[ptr + 1] as usize;
+                let rb = memory[ptr + 2] as usize;
+                let rc = memory[ptr + 3] as usize;
+                let a = memory[ra];
+                let b = memory[rb];
+                replace(&mut memory[rc], a + b);
+                ptr = ptr + 4
+            },
+            2 => {
+                let ra = memory[ptr + 1] as usize;
+                let rb = memory[ptr + 2] as usize;
+                let rc = memory[ptr + 3] as usize;
+                let a = memory[ra];
+                let b = memory[rb];
+                replace(&mut memory[rc], a * b);
+                ptr = ptr + 4
+            }
+            _ => unreachable!()
+        }
+    }
+}
 
 fn main() {
-    println!("Hello, world!");
+    let stdin = io::stdin();
+    let line = stdin
+        .lock()
+        .lines()
+        .next()
+        .expect("there was no next line")
+        .expect("the line could not be read");
+    let mut memory = create_memory(line);
+    replace(&mut memory[1], 12);
+    replace(&mut memory[2], 2);
+    println!("{}", intcode(&mut memory));
 }
 
 #[cfg(test)]
@@ -16,5 +59,25 @@ mod test {
         let mem = create_memory("1,9,10,3,2,3,11,0,99,30,40,50".to_string());
         assert_eq!(mem.len(), 12 as usize);
         assert_eq!(mem[3], 3);
+    }
+    #[test]
+    fn test_intcode() {
+        let mut mem = create_memory("1,9,10,3,2,3,11,0,99,30,40,50".to_string());
+        assert_eq!(intcode(&mut mem), 3500);
+
+        let mut mem = create_memory("1,0,0,0,99".to_string());
+        assert_eq!(intcode(&mut mem), 2);
+
+        let mut mem = create_memory("2,3,0,3,99".to_string());
+        intcode(&mut mem);
+        assert_eq!(mem[3], 6);
+
+        let mut mem = create_memory("2,4,4,5,99,0".to_string());
+        intcode(&mut mem);
+        assert_eq!(mem[5], 9801);
+
+        let mut mem = create_memory("1,1,1,4,99,5,6,0,99".to_string());
+        assert_eq!(intcode(&mut mem), 30);
+        assert_eq!(mem[4], 2);
     }
 }
