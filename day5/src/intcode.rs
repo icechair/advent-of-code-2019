@@ -94,29 +94,111 @@ struct Halt {
 }
 
 impl Instruction for Halt {
-    fn call(&self, memory: &mut Memory) -> usize {
+    fn call(&self, _memory: &mut Memory) -> usize {
         self.ptr
+    }
+}
+
+#[derive(Debug)]
+struct JumpIfTrue {
+    ptr: usize,
+    ma: u8,
+    mb: u8,
+}
+
+impl Instruction for JumpIfTrue {
+    fn call(&self, memory: &mut Memory) -> usize {
+        let va = parameter_mode(&memory, &self.ma, self.ptr + 1);
+        let vb = parameter_mode(&memory, &self.mb, self.ptr + 2);
+        if va > 0 {
+            return vb as usize;
+        }
+        self.ptr + 3
+    }
+}
+
+#[derive(Debug)]
+struct JumpIfFalse {
+    ptr: usize,
+    ma: u8,
+    mb: u8,
+}
+
+impl Instruction for JumpIfFalse {
+    fn call(&self, memory: &mut Memory) -> usize {
+        let va = parameter_mode(&memory, &self.ma, self.ptr + 1);
+        let vb = parameter_mode(&memory, &self.mb, self.ptr + 2);
+        if va == 0 {
+            return vb as usize;
+        }
+        self.ptr + 3
+    }
+}
+
+#[derive(Debug)]
+struct LessThan {
+    ptr: usize,
+    ma: u8,
+    mb: u8,
+}
+
+impl Instruction for LessThan {
+    fn call(&self, memory: &mut Memory) -> usize {
+        let va = parameter_mode(&memory, &self.ma, self.ptr + 1);
+        let vb = parameter_mode(&memory, &self.mb, self.ptr + 2);
+        let rc = memory[self.ptr + 3] as usize;
+        debug!("{:?}, {}, {}, {}", self, va, vb, rc);
+        if va < vb {
+            replace(&mut memory[rc], 1);
+        } else {
+            replace(&mut memory[rc], 0);
+        }
+        self.ptr + 4
+    }
+}
+
+#[derive(Debug)]
+struct Equals {
+    ptr: usize,
+    ma: u8,
+    mb: u8,
+}
+
+impl Instruction for Equals {
+    fn call(&self, memory: &mut Memory) -> usize {
+        let va = parameter_mode(&memory, &self.ma, self.ptr + 1);
+        let vb = parameter_mode(&memory, &self.mb, self.ptr + 2);
+        let rc = memory[self.ptr + 3] as usize;
+        debug!("{:?}, {}, {}, {}", self, va, vb, rc);
+        if va == vb {
+            replace(&mut memory[rc], 1);
+        } else {
+            replace(&mut memory[rc], 0);
+        }
+        self.ptr + 4
+    }
+}
+
+fn parse_opcode(code: String) -> (usize, String) {
+    if code.len() == 1 {
+        (code.parse().unwrap(), String::from(""))
+    } else {
+        let code = code.chars().rev().collect::<String>();
+        let opcode = code[0..2]
+            .chars()
+            .rev()
+            .collect::<String>()
+            .parse::<usize>()
+            .expect("invalid opcode");
+        let params = code[2..].to_string();
+        (opcode, params)
     }
 }
 
 fn instruction_factory(ptr: &usize, code: String) -> Box<dyn Instruction> {
     debug!("factory({}, {})", ptr, code);
     let ptr = *ptr;
-    let opcode: usize;
-    let mut params = String::from("");
-    if code.len() == 1 {
-        opcode = code.parse().unwrap();
-    } else {
-        let code = code.chars().rev().collect::<String>();
-        opcode = code[0..2]
-            .chars()
-            .rev()
-            .collect::<String>()
-            .parse::<usize>()
-            .expect("invalid opcode");
-        params = code[2..].to_string();
-    }
-    debug!("factory: {}, {}", opcode, params);
+    let (opcode, params) = parse_opcode(code);
     match opcode {
         99 => Box::new(Halt { ptr }),
         1 => {
@@ -148,6 +230,50 @@ fn instruction_factory(ptr: &usize, code: String) -> Box<dyn Instruction> {
                 ma = params[0..1].parse().unwrap();
             }
             Box::new(Out { ptr, ma })
+        }
+        5 => {
+            let mut ma: u8 = 0;
+            let mut mb: u8 = 0;
+            if params.len() >= 1 {
+                ma = params[0..1].parse().unwrap();
+            }
+            if params.len() >= 2 {
+                mb = params[1..2].parse().unwrap();
+            }
+            Box::new(JumpIfTrue { ptr, ma, mb })
+        }
+        6 => {
+            let mut ma: u8 = 0;
+            let mut mb: u8 = 0;
+            if params.len() >= 1 {
+                ma = params[0..1].parse().unwrap();
+            }
+            if params.len() >= 2 {
+                mb = params[1..2].parse().unwrap();
+            }
+            Box::new(JumpIfFalse { ptr, ma, mb })
+        }
+        7 => {
+            let mut ma: u8 = 0;
+            let mut mb: u8 = 0;
+            if params.len() >= 1 {
+                ma = params[0..1].parse().unwrap();
+            }
+            if params.len() >= 2 {
+                mb = params[1..2].parse().unwrap();
+            }
+            Box::new(LessThan { ptr, ma, mb })
+        }
+        8 => {
+            let mut ma: u8 = 0;
+            let mut mb: u8 = 0;
+            if params.len() >= 1 {
+                ma = params[0..1].parse().unwrap();
+            }
+            if params.len() >= 2 {
+                mb = params[1..2].parse().unwrap();
+            }
+            Box::new(Equals { ptr, ma, mb })
         }
         _ => unimplemented!(),
     }
