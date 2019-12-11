@@ -3,11 +3,10 @@ extern crate log;
 extern crate env_logger;
 use std::io;
 
+#[macro_use]
 pub mod intcode;
+use intcode::IntCode;
 
-macro_rules! parse {
-    ($x:expr, $t:ident) => ($x.trim().parse::<$t>().expect("parse failed"))
-}
 
 
 fn main() {
