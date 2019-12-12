@@ -7,25 +7,28 @@ use std::fs;
 #[macro_use]
 pub mod intcode;
 use intcode::IntCode;
-use std::io::{BufRead, Write};
-
+use std::io::{BufRead};
+use std::sync::mpsc::{channel};
+use std::thread;
 fn main() {
     env_logger::init();
     let args: Vec<String> = env::args().collect();     
     let filename = &args[1];
+
     let data = fs::read_to_string(filename).expect("coudnt read file");
-    
-    
+
+    let (tx, prx) = channel();
+    let (ptx, rx) = channel();
+    let pdata = data.to_string();
+    thread::spawn(move || {
+        let mut p = IntCode::new(pdata, prx, ptx);
+        p.run();
+    });
     let stdin = io::stdin();
-    let mut stdin = stdin.lock();
-    let input: Box<&mut dyn BufRead> = Box::new(&mut stdin);
-    
-    let mut outbuf:Vec<u8> = Vec::new();
-    let output: Box<&mut dyn Write> = Box::new(&mut outbuf);
-    
-    let mut intcode = IntCode::new(data, input, output);
-    intcode.run();
-    let mut stdout = io::stdout();
-    write!(&mut stdout, "{}", std::str::from_utf8(&outbuf).expect("outbuf is not utf8")).expect("cannot write to stdout?");
-    
+    for (_, line) in stdin.lock().lines().enumerate() {
+        let line = line.expect("cannot read line");
+        tx.send(line).expect("main: cannot send");
+    } 
+    let out = rx.recv().expect("main: cannot recv");
+    println!("{}", out);
 }

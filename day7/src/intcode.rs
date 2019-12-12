@@ -1,6 +1,6 @@
-use std::io::{BufRead, Write};
 use std::iter::repeat;
 use std::mem::replace;
+use std::sync::mpsc::{Sender, Receiver};
 macro_rules! parse {
     ($x:expr, $t:ident) => {
         $x.trim().parse::<$t>().expect("parse failed")
@@ -18,24 +18,24 @@ fn create_memory(data: String) -> Memory {
         .collect()
 }
 
-pub struct IntCode<'a> {
+pub struct IntCode {
     memory: Memory,
-    input: Box<&'a mut dyn BufRead>,
-    output: Box<&'a mut dyn Write>,
+    rx: Receiver<String>,
+    tx: Sender<String>,
     ptr: usize,
 }
 
-impl<'a> IntCode<'a> {
+impl IntCode {
     pub fn new(
         line: String,
-        input: Box<&'a mut dyn BufRead>,
-        output: Box<&'a mut dyn Write>,
+        rx: Receiver<String>,
+        tx: Sender<String>,
     ) -> Self {
         let memory = create_memory(line).to_owned();
         Self {
             memory: memory,
-            input,
-            output,
+            rx,
+            tx,
             ptr: 0,
         }
     }
@@ -62,13 +62,12 @@ impl<'a> IntCode<'a> {
         replace(&mut self.memory[address], value);
     }
 
-    fn input(&mut self) -> i64 {
-        let mut line = String::new();
-        self.input.read_line(&mut line).expect("coudnt read line");
+    fn input(&self) -> i64 {
+        let line = self.rx.recv().expect("input: cannot receive");
         parse!(line, i64)
     }
     fn output(&mut self, value: i64) {
-        writeln!(self.output.as_mut(), "{}", value).expect("coudnt write line")
+        self.tx.send(format!("{}", value)).expect("output: cannot transmit value");
     }
 
     pub fn run(&mut self) {
@@ -327,7 +326,8 @@ fn instruction(code: i64) -> Box<dyn Instruction> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::io;
+    use std::sync::mpsc::channel;
+    use std::thread;
     #[test]
     fn test_opcode() {
         let (op, param) = opcode(1002);
@@ -341,26 +341,14 @@ mod test {
     #[test]
     fn test_immediate_eq8() {
         env_logger::init();
-        let mut cursor = io::Cursor::new(b"1\n");
-        let input: Box<&mut dyn BufRead> = Box::new(&mut cursor);
-        let mut outbuf: Vec<u8> = Vec::new();
-        {
-            let output: Box<&mut dyn Write> = Box::new(&mut outbuf);
-            let mut p: IntCode =
-                IntCode::new(String::from("3,3,1108,-1,8,3,4,3,99"), input, output);
+        let (tx, prx) = channel();
+        let (ptx, rx) = channel();
+        thread::spawn(move || {
+            let mut p = IntCode::new(String::from("3,3,1108,-1,8,3,4,3,99"), prx, ptx);
             p.run();
-        }
-        assert_eq!(String::from_utf8(outbuf).expect("not utf8"), String::from("0\n"));
-
-        let mut cursor = io::Cursor::new(b"8\n");
-        let input: Box<&mut dyn BufRead> = Box::new(&mut cursor);
-        let mut outbuf: Vec<u8> = Vec::new();
-        {
-            let output: Box<&mut dyn Write> = Box::new(&mut outbuf);
-            let mut p: IntCode =
-                IntCode::new(String::from("3,3,1108,-1,8,3,4,3,99"), input, output);
-            p.run();
-        }
-        assert_eq!(String::from_utf8(outbuf).expect("not utf8"), String::from("1\n"));
+        });
+        tx.send(String::from("1")).expect("cannot send");
+        let pout = rx.recv().expect("cannot recv");
+        assert_eq!(parse!(pout, i64), 0);
     }
 }
