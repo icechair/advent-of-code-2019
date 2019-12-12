@@ -339,7 +339,7 @@ mod test {
         assert_eq!(add.2, 0);
     }
     #[test]
-    fn test_intcode() {
+    fn test_immediate_eq8() {
         env_logger::init();
         let mut cursor = io::Cursor::new(b"1\n");
         let input: Box<&mut dyn BufRead> = Box::new(&mut cursor);
@@ -347,12 +347,20 @@ mod test {
         {
             let output: Box<&mut dyn Write> = Box::new(&mut outbuf);
             let mut p: IntCode =
-                IntCode::new(String::from("1,9,10,3,2,3,11,0,99,30,40,50"), input, output);
+                IntCode::new(String::from("3,3,1108,-1,8,3,4,3,99"), input, output);
             p.run();
-            println!("{:?}", p.memory);
-            assert_eq!(p.memory[0], 3500);
-            assert_eq!(p.memory[3], 70);
         }
-        println!("{:?}", &outbuf);
+        assert_eq!(String::from_utf8(outbuf).expect("not utf8"), String::from("0\n"));
+
+        let mut cursor = io::Cursor::new(b"8\n");
+        let input: Box<&mut dyn BufRead> = Box::new(&mut cursor);
+        let mut outbuf: Vec<u8> = Vec::new();
+        {
+            let output: Box<&mut dyn Write> = Box::new(&mut outbuf);
+            let mut p: IntCode =
+                IntCode::new(String::from("3,3,1108,-1,8,3,4,3,99"), input, output);
+            p.run();
+        }
+        assert_eq!(String::from_utf8(outbuf).expect("not utf8"), String::from("1\n"));
     }
 }
