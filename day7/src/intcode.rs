@@ -329,12 +329,15 @@ fn instruction(code: i64) -> Box<dyn Instruction> {
 
 pub fn spawn(
     data: String,
-    phase: String,
+    init: Option<String>,
 ) -> (Sender<String>, Receiver<String>, thread::JoinHandle<()>) {
     let (tx, rxp) = channel();
     let (txp, rx) = channel();
     let handle = thread::spawn(move || IntCode::new(data, txp, rxp).run());
-    tx.send(phase).unwrap();
+    match init {
+        Some(data) => tx.send(data).unwrap(),
+        None => {}
+    };
     (tx, rx, handle)
 }
 
