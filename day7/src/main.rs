@@ -16,8 +16,6 @@ use std::thread;
 pub mod intcode;
 use intcode::IntCode;
 
-pub mod permute;
-
 fn spawn(
     data: String,
     phase: String,
@@ -37,7 +35,7 @@ fn main() {
     let to = parse!(&args[3], usize);
     let data = fs::read_to_string(filename).unwrap();
 
-    for settings in (from..to).permutations(5) {
+    for settings in (from..(to + 1)).permutations(5) {
         let phase_a = settings[0].to_string();
         let (tx_to_a, rx_from_a, _) = spawn(data.clone(), phase_a);
         tx_to_a.send(String::from("0")).unwrap();
