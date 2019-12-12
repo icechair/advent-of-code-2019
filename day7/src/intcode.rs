@@ -1,6 +1,6 @@
 use std::iter::repeat;
 use std::mem::replace;
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{Receiver, Sender};
 macro_rules! parse {
     ($x:expr, $t:ident) => {
         $x.trim().parse::<$t>().expect("parse failed")
@@ -20,22 +20,18 @@ fn create_memory(data: String) -> Memory {
 
 pub struct IntCode {
     memory: Memory,
-    rx: Receiver<String>,
     tx: Sender<String>,
+    rx: Receiver<String>,
     ptr: usize,
 }
 
 impl IntCode {
-    pub fn new(
-        line: String,
-        rx: Receiver<String>,
-        tx: Sender<String>,
-    ) -> Self {
+    pub fn new(line: String, tx: Sender<String>, rx: Receiver<String>) -> Self {
         let memory = create_memory(line).to_owned();
         Self {
             memory: memory,
-            rx,
             tx,
+            rx,
             ptr: 0,
         }
     }
@@ -67,7 +63,9 @@ impl IntCode {
         parse!(line, i64)
     }
     fn output(&mut self, value: i64) {
-        self.tx.send(format!("{}", value)).expect("output: cannot transmit value");
+        self.tx
+            .send(format!("{}", value))
+            .expect("output: cannot transmit value");
     }
 
     pub fn run(&mut self) {
@@ -344,7 +342,7 @@ mod test {
         let (tx, prx) = channel();
         let (ptx, rx) = channel();
         thread::spawn(move || {
-            let mut p = IntCode::new(String::from("3,3,1108,-1,8,3,4,3,99"), prx, ptx);
+            let mut p = IntCode::new(String::from("3,3,1108,-1,8,3,4,3,99"), ptx, prx);
             p.run();
         });
         tx.send(String::from("1")).expect("cannot send");
