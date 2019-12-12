@@ -18,17 +18,18 @@ fn create_memory(data: String) -> Memory {
         .collect()
 }
 
-pub struct IntCode {
+pub struct IntCode<'a> {
     memory: Memory,
-    input: Box<dyn BufRead>,
-    output: Box<dyn Write>,
+    input: Box<&'a mut dyn BufRead>,
+    output: Box<&'a mut dyn Write>,
     ptr: usize,
 }
-impl IntCode {
+
+impl<'a> IntCode<'a> {
     pub fn new(
         line: String,
-        input: Box<dyn BufRead>,
-        output: Box<dyn Write>,
+        input: Box<&'a mut dyn BufRead>,
+        output: Box<&'a mut dyn Write>,
     ) -> Self {
         let memory = create_memory(line).to_owned();
         Self {
@@ -66,7 +67,6 @@ impl IntCode {
         self.input.read_line(&mut line).expect("coudnt read line");
         parse!(line, i64)
     }
-    
     fn output(&mut self, value: i64) {
         writeln!(self.output.as_mut(), "{}", value).expect("coudnt write line")
     }
@@ -76,6 +76,7 @@ impl IntCode {
         loop {
             let code = self.memory[self.ptr];
             debug!("run|ptr:{}", self.ptr);
+            debug!("run|memory:{:?}", self.memory);
             let inst = instruction(code);
             self.ptr = inst.call(self);
             if self.ptr == last {
@@ -170,7 +171,7 @@ impl Instruction for In {
         let va = intcode.input();
         debug!("{:?}|{},{}", self, aa, va);
         intcode.write(aa as usize, va);
-        intcode.ptr + 2 
+        intcode.ptr + 2
     }
 }
 
@@ -190,7 +191,7 @@ impl Instruction for Out {
         let va = intcode.fetch_param(self.0, 1);
         debug!("{:?}|{}", self, va);
         intcode.output(va);
-        intcode.ptr + 2 
+        intcode.ptr + 2
     }
 }
 #[derive(Debug)]
@@ -200,7 +201,7 @@ impl JumpTrue {
         let mut params = params;
         let a = pop_digit!(&mut params);
         let b = pop_digit!(&mut params);
-        Self(a,b)
+        Self(a, b)
     }
 }
 
@@ -223,7 +224,7 @@ impl JumpFalse {
         let mut params = params;
         let a = pop_digit!(&mut params);
         let b = pop_digit!(&mut params);
-        Self(a,b)
+        Self(a, b)
     }
 }
 
@@ -247,7 +248,7 @@ impl LessThan {
         let a = pop_digit!(&mut params);
         let b = pop_digit!(&mut params);
         let c = pop_digit!(&mut params);
-        Self(a,b,c)
+        Self(a, b, c)
     }
 }
 
@@ -255,8 +256,8 @@ impl Instruction for LessThan {
     fn call(&self, intcode: &mut IntCode) -> usize {
         let va = intcode.fetch_param(self.0, 1);
         let vb = intcode.fetch_param(self.1, 2);
-        let ac = intcode.fetch_param(self.1, 3);
-        debug!("{:?}|{},{},{}", self, va, vb,ac);
+        let ac = intcode.fetch_param(1, 3);
+        debug!("{:?}|{},{},{}", self, va, vb, ac);
         if va < vb {
             intcode.write(ac as usize, 1);
         } else {
@@ -274,7 +275,7 @@ impl Equals {
         let a = pop_digit!(&mut params);
         let b = pop_digit!(&mut params);
         let c = pop_digit!(&mut params);
-        Self(a,b,c)
+        Self(a, b, c)
     }
 }
 
@@ -282,9 +283,9 @@ impl Instruction for Equals {
     fn call(&self, intcode: &mut IntCode) -> usize {
         let va = intcode.fetch_param(self.0, 1);
         let vb = intcode.fetch_param(self.1, 2);
-        let ac = intcode.fetch_param(self.1, 3);
-        debug!("{:?}|{},{},{}", self, va, vb,ac);
-        if va < vb {
+        let ac = intcode.fetch_param(1, 3);
+        debug!("{:?}|{},{},{}", self, va, vb, ac);
+        if va == vb {
             intcode.write(ac as usize, 1);
         } else {
             intcode.write(ac as usize, 0);
@@ -319,7 +320,7 @@ fn instruction(code: i64) -> Box<dyn Instruction> {
         6 => Box::new(JumpFalse::new(params)),
         7 => Box::new(LessThan::new(params)),
         8 => Box::new(Equals::new(params)),
-        _ => unimplemented!()
+        _ => unimplemented!(),
     }
 }
 
@@ -338,14 +339,20 @@ mod test {
         assert_eq!(add.2, 0);
     }
     #[test]
-    fn test_intcode<'a>() {
+    fn test_intcode() {
         env_logger::init();
-        let input: Box<dyn BufRead> = Box::new(io::Cursor::new(b"13\n14"));
-        let output: Box<dyn Write> = Box::new(Vec::new());
-        let mut p: IntCode = IntCode::new(String::from("1,9,10,3,2,3,11,0,99,30,40,50"), input, output);
-        p.run();
-        println!("{:?}", p.memory);
-        assert_eq!(p.memory[0], 3500);
-        assert_eq!(p.memory[3], 70);
+        let mut cursor = io::Cursor::new(b"1\n");
+        let input: Box<&mut dyn BufRead> = Box::new(&mut cursor);
+        let mut outbuf: Vec<u8> = Vec::new();
+        {
+            let output: Box<&mut dyn Write> = Box::new(&mut outbuf);
+            let mut p: IntCode =
+                IntCode::new(String::from("1,9,10,3,2,3,11,0,99,30,40,50"), input, output);
+            p.run();
+            println!("{:?}", p.memory);
+            assert_eq!(p.memory[0], 3500);
+            assert_eq!(p.memory[3], 70);
+        }
+        println!("{:?}", &outbuf);
     }
 }
