@@ -2,7 +2,6 @@
 extern crate log;
 extern crate env_logger;
 
-#[macro_use]
 extern crate itertools;
 use itertools::Itertools;
 
@@ -10,11 +9,12 @@ use std::env;
 use std::fs;
 
 #[macro_use]
-pub mod intcode;
+extern crate intcode;
 use intcode::spawn;
 
 fn main() {
     env_logger::init();
+    debug!("start");
     let args: Vec<String> = env::args().collect();
     let filename = &args[1];
     let from = parse!(&args[2], usize);

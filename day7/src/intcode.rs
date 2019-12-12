@@ -1,8 +1,12 @@
+#[macro_use]
+extern crate log;
+
 use std::iter::repeat;
 use std::mem::replace;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 
+#[macro_export]
 macro_rules! parse {
     ($x:expr, $t:ident) => {
         $x.trim().parse::<$t>().expect("parse failed")
