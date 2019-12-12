@@ -1,6 +1,8 @@
 use std::iter::repeat;
 use std::mem::replace;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
+
 macro_rules! parse {
     ($x:expr, $t:ident) => {
         $x.trim().parse::<$t>().expect("parse failed")
@@ -18,7 +20,7 @@ fn create_memory(data: String) -> Memory {
         .collect()
 }
 
-pub struct IntCode {
+struct IntCode {
     memory: Memory,
     tx: Sender<String>,
     rx: Receiver<String>,
@@ -26,7 +28,7 @@ pub struct IntCode {
 }
 
 impl IntCode {
-    pub fn new(line: String, tx: Sender<String>, rx: Receiver<String>) -> Self {
+    fn new(line: String, tx: Sender<String>, rx: Receiver<String>) -> Self {
         let memory = create_memory(line).to_owned();
         Self {
             memory: memory,
@@ -319,6 +321,17 @@ fn instruction(code: i64) -> Box<dyn Instruction> {
         8 => Box::new(Equals::new(params)),
         _ => unimplemented!(),
     }
+}
+
+pub fn spawn(
+    data: String,
+    phase: String,
+) -> (Sender<String>, Receiver<String>, thread::JoinHandle<()>) {
+    let (tx, rxp) = channel();
+    let (txp, rx) = channel();
+    let handle = thread::spawn(move || IntCode::new(data, txp, rxp).run());
+    tx.send(phase).unwrap();
+    (tx, rx, handle)
 }
 
 #[cfg(test)]

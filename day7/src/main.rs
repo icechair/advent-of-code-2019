@@ -8,24 +8,10 @@ use itertools::Itertools;
 
 use std::env;
 use std::fs;
-use std::io;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use std::thread;
 
 #[macro_use]
 pub mod intcode;
-use intcode::IntCode;
-
-fn spawn(
-    data: String,
-    phase: String,
-) -> (Sender<String>, Receiver<String>, thread::JoinHandle<()>) {
-    let (tx, rxp) = channel();
-    let (txp, rx) = channel();
-    let handle = thread::spawn(move || IntCode::new(data, txp, rxp).run());
-    tx.send(phase).unwrap();
-    (tx, rx, handle)
-}
+use intcode::spawn;
 
 fn main() {
     env_logger::init();
