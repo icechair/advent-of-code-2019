@@ -1,6 +1,12 @@
+#[macro_use]
+extern crate log;
+
 use std::iter::repeat;
 use std::mem::replace;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::thread;
+
+#[macro_export]
 macro_rules! parse {
     ($x:expr, $t:ident) => {
         $x.trim().parse::<$t>().expect("parse failed")
@@ -18,44 +24,46 @@ fn create_memory(data: String) -> Memory {
         .collect()
 }
 
-pub struct IntCode {
+struct IntCode {
     memory: Memory,
     tx: Sender<String>,
     rx: Receiver<String>,
     ptr: usize,
+    rel: i64,
 }
 
 impl IntCode {
-    pub fn new(line: String, tx: Sender<String>, rx: Receiver<String>) -> Self {
+    fn new(line: String, tx: Sender<String>, rx: Receiver<String>) -> Self {
         let memory = create_memory(line).to_owned();
         Self {
             memory: memory,
             tx,
             rx,
             ptr: 0,
+            rel: 0,
         }
     }
     fn extend(&mut self, addr: &usize) {
-        self.memory.extend(repeat(0).take(addr - self.memory.len()))
-    }
-    fn fetch_param(&mut self, mode: u32, offset: usize) -> i64 {
-        if self.ptr + offset > self.memory.len() {
-            self.extend(&offset);
+        // debug!("extend({}, {})", addr, self.memory.len());
+        if self.memory.len() <= *addr {
+            self.memory
+                .extend(repeat(0).take(*addr - self.memory.len() + 1))
         }
-        let value = self.memory[self.ptr + offset];
-        match mode {
-            0 => {
-                if value as usize > self.memory.len() {
-                    self.extend(&(value as usize));
-                }
-                self.memory[value as usize]
+    }
+    fn get_address(&mut self, mode: u32, offset: usize) -> usize {
+        let addr = self.ptr + offset;
+        let out = match mode {
+            0 => self.memory[addr] as usize,
+            1 => addr,
+            2 => {
+                let addr = self.rel + self.memory[addr];
+                addr as usize
             }
-            1 => value,
             _ => unimplemented!(),
-        }
-    }
-    fn write(&mut self, address: usize, value: i64) {
-        replace(&mut self.memory[address], value);
+        };
+        self.extend(&out);
+        debug!("get_addr({}, {}) -> {}", mode, offset, out);
+        out
     }
 
     fn input(&self) -> i64 {
@@ -72,8 +80,7 @@ impl IntCode {
         let mut last = 0;
         loop {
             let code = self.memory[self.ptr];
-            debug!("run|ptr:{}", self.ptr);
-            debug!("run|memory:{:?}", self.memory);
+            debug!("run|ptr:{}, rel:{}, {:?}", self.ptr, self.rel, self.memory);
             let inst = instruction(code);
             self.ptr = inst.call(self);
             if self.ptr == last {
@@ -121,13 +128,14 @@ impl Add {
     }
 }
 impl Instruction for Add {
-    fn call(&self, intcode: &mut IntCode) -> usize {
-        let va = intcode.fetch_param(self.0, 1);
-        let vb = intcode.fetch_param(self.1, 2);
-        let ac = intcode.fetch_param(1, 3);
-        debug!("{:?}|{},{},{}", self, va, vb, ac);
-        intcode.write(ac as usize, va + vb);
-        intcode.ptr + 4
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        let b = p.get_address(self.1, 2);
+        let c = p.get_address(self.2, 3);
+        debug!("{:?}:{} {} {}", self, a, b, c);
+        let value = p.memory[a] + p.memory[b];
+        replace(&mut p.memory[c], value);
+        p.ptr + 4
     }
 }
 
@@ -143,13 +151,14 @@ impl Mul {
     }
 }
 impl Instruction for Mul {
-    fn call(&self, intcode: &mut IntCode) -> usize {
-        let va = intcode.fetch_param(self.0, 1);
-        let vb = intcode.fetch_param(self.1, 2);
-        let ac = intcode.fetch_param(1, 3);
-        debug!("{:?}|{},{},{}", self, va, vb, ac);
-        intcode.write(ac as usize, va * vb);
-        intcode.ptr + 4
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        let b = p.get_address(self.1, 2);
+        let c = p.get_address(self.2, 3);
+        debug!("{:?}:{} {} {}", self, a, b, c);
+        let value = p.memory[a] * p.memory[b];
+        replace(&mut p.memory[c], value);
+        p.ptr + 4
     }
 }
 #[derive(Debug)]
@@ -163,12 +172,12 @@ impl In {
 }
 
 impl Instruction for In {
-    fn call(&self, intcode: &mut IntCode) -> usize {
-        let aa = intcode.fetch_param(1, 1);
-        let va = intcode.input();
-        debug!("{:?}|{},{}", self, aa, va);
-        intcode.write(aa as usize, va);
-        intcode.ptr + 2
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        debug!("{:?}:{}", self, a);
+        let value = p.input();
+        replace(&mut p.memory[a], value);
+        p.ptr + 2
     }
 }
 
@@ -184,11 +193,11 @@ impl Out {
 }
 
 impl Instruction for Out {
-    fn call(&self, intcode: &mut IntCode) -> usize {
-        let va = intcode.fetch_param(self.0, 1);
-        debug!("{:?}|{}", self, va);
-        intcode.output(va);
-        intcode.ptr + 2
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        debug!("{:?}:{}", self, a);
+        p.output(p.memory[a]);
+        p.ptr + 2
     }
 }
 #[derive(Debug)]
@@ -203,14 +212,16 @@ impl JumpTrue {
 }
 
 impl Instruction for JumpTrue {
-    fn call(&self, intcode: &mut IntCode) -> usize {
-        let va = intcode.fetch_param(self.0, 1);
-        let vb = intcode.fetch_param(self.1, 2);
-        debug!("{:?}|{},{}", self, va, vb);
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        let b = p.get_address(self.1, 2);
+        let va = p.memory[a];
+        let vb = p.memory[b];
+        debug!("{:?}:[{}, {}] -> [{}, {}]", self, a, b, va, vb);
         if va > 0 {
             return vb as usize;
         }
-        intcode.ptr + 3
+        p.ptr + 3
     }
 }
 
@@ -226,14 +237,16 @@ impl JumpFalse {
 }
 
 impl Instruction for JumpFalse {
-    fn call(&self, intcode: &mut IntCode) -> usize {
-        let va = intcode.fetch_param(self.0, 1);
-        let vb = intcode.fetch_param(self.1, 2);
-        debug!("{:?}|{},{}", self, va, vb);
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        let b = p.get_address(self.1, 2);
+        let va = p.memory[a];
+        let vb = p.memory[b];
+        debug!("{:?}:[{}, {}] -> [{}, {}]", self, a, b, va, vb);
         if va == 0 {
             return vb as usize;
         }
-        intcode.ptr + 3
+        p.ptr + 3
     }
 }
 
@@ -250,17 +263,18 @@ impl LessThan {
 }
 
 impl Instruction for LessThan {
-    fn call(&self, intcode: &mut IntCode) -> usize {
-        let va = intcode.fetch_param(self.0, 1);
-        let vb = intcode.fetch_param(self.1, 2);
-        let ac = intcode.fetch_param(1, 3);
-        debug!("{:?}|{},{},{}", self, va, vb, ac);
-        if va < vb {
-            intcode.write(ac as usize, 1);
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        let b = p.get_address(self.1, 2);
+        let c = p.get_address(self.2, 3);
+        debug!("{:?}:{} {} {}", self, a, b, c);
+        let value = p.memory[a] < p.memory[b];
+        if value {
+            replace(&mut p.memory[c], 1);
         } else {
-            intcode.write(ac as usize, 0);
+            replace(&mut p.memory[c], 0);
         }
-        intcode.ptr + 4
+        p.ptr + 4
     }
 }
 
@@ -277,17 +291,37 @@ impl Equals {
 }
 
 impl Instruction for Equals {
-    fn call(&self, intcode: &mut IntCode) -> usize {
-        let va = intcode.fetch_param(self.0, 1);
-        let vb = intcode.fetch_param(self.1, 2);
-        let ac = intcode.fetch_param(1, 3);
-        debug!("{:?}|{},{},{}", self, va, vb, ac);
-        if va == vb {
-            intcode.write(ac as usize, 1);
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        let b = p.get_address(self.1, 2);
+        let c = p.get_address(self.2, 3);
+        debug!("{:?}:{} {} {}", self, a, b, c);
+        let value = p.memory[a] == p.memory[b];
+        if value {
+            replace(&mut p.memory[c], 1);
         } else {
-            intcode.write(ac as usize, 0);
+            replace(&mut p.memory[c], 0);
         }
-        intcode.ptr + 4
+        p.ptr + 4
+    }
+}
+#[derive(Debug)]
+struct AdjustRel(u32);
+impl AdjustRel {
+    fn new(params: String) -> Self {
+        let mut params = params;
+        let a = pop_digit!(&mut params);
+        Self(a)
+    }
+}
+
+impl Instruction for AdjustRel {
+    fn call(&self, p: &mut IntCode) -> usize {
+        let a = p.get_address(self.0, 1);
+        debug!("{:?}:{}", self, a);
+        let value = p.memory[a];
+        p.rel += value;
+        p.ptr + 2
     }
 }
 
@@ -317,15 +351,28 @@ fn instruction(code: i64) -> Box<dyn Instruction> {
         6 => Box::new(JumpFalse::new(params)),
         7 => Box::new(LessThan::new(params)),
         8 => Box::new(Equals::new(params)),
+        9 => Box::new(AdjustRel::new(params)),
         _ => unimplemented!(),
     }
+}
+
+pub fn spawn(
+    data: String,
+    init: Option<String>,
+) -> (Sender<String>, Receiver<String>, thread::JoinHandle<()>) {
+    let (tx, rxp) = channel();
+    let (txp, rx) = channel();
+    let handle = thread::spawn(move || IntCode::new(data, txp, rxp).run());
+    match init {
+        Some(data) => tx.send(data).unwrap(),
+        None => {}
+    };
+    (tx, rx, handle)
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::sync::mpsc::channel;
-    use std::thread;
     #[test]
     fn test_opcode() {
         let (op, param) = opcode(1002);
@@ -337,16 +384,150 @@ mod test {
         assert_eq!(add.2, 0);
     }
     #[test]
+    fn test_add() {
+        let data = String::from("1,0,0,0,99");
+        let (tx, rx) = channel();
+        let mut p = IntCode::new(data, tx, rx);
+        p.run();
+        let expected: Memory = vec![2, 0, 0, 0, 99];
+        assert_eq!(p.memory, expected);
+    }
+    #[test]
+    fn test_mul() {
+        let data = String::from("2,3,0,3,99");
+        let (tx, rx) = channel();
+        let mut p = IntCode::new(data, tx, rx);
+        p.run();
+        let expected: Memory = vec![2, 3, 0, 6, 99];
+        assert_eq!(p.memory, expected);
+
+        let data = String::from("2,4,4,5,99,0");
+        let (tx, rx) = channel();
+        let mut p = IntCode::new(data, tx, rx);
+        p.run();
+        let expected: Memory = vec![2, 4, 4, 5, 99, 9801];
+        assert_eq!(p.memory, expected);
+
+        let data = String::from("1,1,1,4,99,5,6,0,99");
+        let (tx, rx) = channel();
+        let mut p = IntCode::new(data, tx, rx);
+        p.run();
+        let expected: Memory = vec![30, 1, 1, 4, 2, 5, 6, 0, 99];
+        assert_eq!(p.memory, expected);
+    }
+    #[test]
+    fn test_pos_eq8() {
+        let data = String::from("3,9,8,9,10,9,4,9,99,-1,8");
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("1".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 0);
+        }
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("8".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 1);
+        }
+    }
+
+    #[test]
+    fn test_pos_lt8() {
+        let data = String::from("3,9,7,9,10,9,4,9,99,-1,8");
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("1".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 1);
+        }
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("8".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 0);
+        }
+    }
+
+    #[test]
     fn test_immediate_eq8() {
+        let data = String::from("3,3,1108,-1,8,3,4,3,99");
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("1".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 0);
+        }
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("8".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 1);
+        }
+    }
+
+    #[test]
+    fn test_immediate_lt8() {
+        let data = String::from("3,3,1107,-1,8,3,4,3,99");
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("1".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 1);
+        }
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("8".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 0);
+        }
+    }
+    #[test]
+    fn test_pos_jump() {
+        let data = String::from("3,12,6,12,15,1,13,14,13,4,13,99,-1,0,1,9");
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("8".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 1);
+        }
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("0".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 0);
+        }
+    }
+
+    #[test]
+    fn test_immediate_jump() {
+        let data = String::from("3,3,1105,-1,9,1101,0,0,12,4,12,99,1");
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("8".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 1);
+        }
+        {
+            let (_tx, rx, _) = spawn(data.clone(), Some("0".to_string()));
+            let pout = rx.recv().expect("cannot recv");
+            assert_eq!(parse!(pout, i64), 0);
+        }
+    }
+    #[test]
+    fn test_relative_mode() {
         env_logger::init();
-        let (tx, prx) = channel();
-        let (ptx, rx) = channel();
-        thread::spawn(move || {
-            let mut p = IntCode::new(String::from("3,3,1108,-1,8,3,4,3,99"), ptx, prx);
-            p.run();
-        });
-        tx.send(String::from("1")).expect("cannot send");
-        let pout = rx.recv().expect("cannot recv");
-        assert_eq!(parse!(pout, i64), 0);
+        let data = String::from("109,1,204,-1,1001,100,1,100,1008,100,16,101,1006,101,0,99");
+        let (_tx, rx, _) = spawn(data.clone(), None);
+        let mut output: Vec<String> = Vec::with_capacity(16);
+        for recv in rx {
+            output.push(recv);
+        }
+        assert_eq!(output.join(","), data);
+    }
+
+    #[test]
+    fn test_sixteen_digits() {
+        let data = String::from("1102,34915192,34915192,7,4,7,99,0");
+        let (_tx, rx, _) = spawn(data.clone(), None);
+        let output = rx.recv().unwrap();
+        assert_eq!(output, "1219070632396864".to_string());
+    }
+
+    #[test]
+    fn test_output_large() {
+        let data = String::from("104,1125899906842624,99");
+        let (_tx, rx, _) = spawn(data.clone(), None);
+        let output = rx.recv().unwrap();
+        assert_eq!(output, "1125899906842624".to_string());
     }
 }
