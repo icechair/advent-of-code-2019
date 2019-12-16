@@ -3,14 +3,14 @@ extern crate log;
 extern crate env_logger;
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::f64::consts::PI;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct Point(i64, i64);
 impl Point {
     fn new(x: i64, y: i64) -> Self {
-        Self(x,y)
+        Self(x, y)
     }
 
     fn distance(&self, other: &Self) -> i64 {
@@ -19,7 +19,11 @@ impl Point {
     fn bearing(&self, o: &Self) -> f64 {
         let dx = (self.0 - o.0) as f64;
         let dy = (self.1 - o.1) as f64;
-        dy.atan2(dx)
+        let mut angle = dy.atan2(dx) + 1.5 * PI;
+        if angle > 2.0 * PI {
+            angle -= 2.0 * PI;
+        }
+        angle
     }
 }
 
@@ -70,7 +74,6 @@ fn main() {
     }
 
     let mut visibilities: HashMap<Point, usize> = HashMap::new();
-    
     for a in &asteroids {
         let mut bearings: Vec<f64> = Vec::with_capacity(asteroids.len() - 1);
         for b in &asteroids {
@@ -83,7 +86,8 @@ fn main() {
         let v = visibilities.entry(a.clone()).or_insert(0);
         *v = list.len();
     }
-    let mut values: Vec<(Point, usize)> = visibilities.iter().map(|(k, v)| (k.clone(),*v)).collect();
+    let mut values: Vec<(Point, usize)> =
+        visibilities.iter().map(|(k, v)| (k.clone(), *v)).collect();
     values.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
     println!("{:?}", values.pop().unwrap());
 }
@@ -109,5 +113,8 @@ mod test {
         assert_eq!(a.bearing(&b), a.bearing(&c));
         assert_ne!(b.bearing(&a), b.bearing(&c));
         assert_eq!(c.bearing(&a), c.bearing(&b));
+
+        let d = Point::new(2, 0);
+        assert_eq!(b.bearing(&d), std::f64::consts::PI);
     }
 }
