@@ -20,7 +20,7 @@ impl Point {
         let dx = (self.0 - o.0) as f64;
         let dy = (self.1 - o.1) as f64;
         let mut angle = dy.atan2(dx) + 1.5 * PI;
-        if angle > 2.0 * PI {
+        if angle >= 2.0 * PI {
             angle -= 2.0 * PI;
         }
         angle
@@ -107,14 +107,25 @@ mod test {
 
     #[test]
     fn test_bearing() {
-        let a = Point::new(1, 0);
-        let b = Point::new(2, 2);
-        let c = Point::new(3, 4);
-        assert_eq!(a.bearing(&b), a.bearing(&c));
-        assert_ne!(b.bearing(&a), b.bearing(&c));
-        assert_eq!(c.bearing(&a), c.bearing(&b));
+        let a = Point::new(1, 1);
+        let b = Point::new(2, 1);
+        let c = Point::new(1, 2);
+        let d = Point::new(2, 2);
 
-        let d = Point::new(2, 0);
-        assert_eq!(b.bearing(&d), std::f64::consts::PI);
+        assert_eq!(a.bearing(&b), 0.5 * PI);
+        assert_eq!(a.bearing(&c), PI);
+        assert_eq!(a.bearing(&d), 0.75 * PI);
+
+        assert_eq!(b.bearing(&a), 1.5 * PI);
+        assert_eq!(b.bearing(&c), 1.25 * PI);
+        assert_eq!(b.bearing(&d), PI);
+
+        assert_eq!(c.bearing(&a), 0.0);
+        assert_eq!(c.bearing(&b), 0.25 * PI);
+        assert_eq!(c.bearing(&d), 0.5 * PI);
+
+        assert_eq!(d.bearing(&a), 1.75 * PI);
+        assert_eq!(d.bearing(&b), 0.0);
+        assert_eq!(d.bearing(&c), 1.5 * PI);
     }
 }
