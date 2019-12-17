@@ -1,5 +1,3 @@
-#[macro_use]
-extern crate log;
 
 use std::iter::repeat;
 use std::mem::replace;
