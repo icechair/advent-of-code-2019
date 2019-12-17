@@ -1,6 +1,5 @@
 #[macro_use]
 extern crate log;
-pub mod intcode;
 
 use std::iter::repeat;
 use std::mem::replace;
