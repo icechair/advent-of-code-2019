@@ -1,5 +1,10 @@
+extern crate regex;
 use std::cmp::Ordering;
 use std::ops;
+use std::env;
+use std::fs::File;
+use std::io::{BufRead,BufReader};
+use regex::Regex;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Vector {
@@ -30,6 +35,9 @@ impl Vector {
         };
         Vector { x, y, z }
     }
+    fn energy(&self) -> i64 {
+        self.x.abs() + self.y.abs() + self.z.abs()
+    }
 }
 impl ops::Add for Vector {
     type Output = Vector;
@@ -38,22 +46,22 @@ impl ops::Add for Vector {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Planet {
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub struct Moon {
     position: Vector,
     velocity: Vector,
 }
-impl Planet {
+impl Moon {
     pub fn new(position: Vector, velocity: Vector) -> Self {
-        Planet { position, velocity }
+        Moon { position, velocity }
     }
 }
 
-pub fn simulate(planets: &Vec<Planet>) -> Vec<Planet> {
-    let mut result = Vec::with_capacity(planets.len());
-    for a in planets {
+pub fn simulate(moons: &Vec<Moon>) -> Vec<Moon> {
+    let mut result = Vec::with_capacity(moons.len());
+    for a in moons {
         let mut gravity = Vector::new(0, 0, 0);
-        for b in planets {
+        for b in moons {
             if a == b {
                 continue;
             }
@@ -61,39 +69,97 @@ pub fn simulate(planets: &Vec<Planet>) -> Vec<Planet> {
         }
         let velocity = a.velocity + gravity;
         let position = a.position + velocity;
-        result.push(Planet::new(position, velocity));
+        result.push(Moon::new(position, velocity));
     }
     result
 }
 
-fn main() {
-    println!("Hello, world!");
+fn total_energy(sum:i64, x: &Moon) -> i64 {
+    sum + x.position.energy() * x.velocity.energy()
 }
+
+fn read_moons(filename: String) -> Vec<Moon> {
+    let mut moons = Vec::new();
+    let file = File::open(filename).expect("read_moons: cannot read file");
+    let reader = BufReader::new(file);
+    let re = Regex::new(r"x=([\d-]*).*y=([\d-]*).*z=([\d-]*)").expect("read_moons: cannot create regex");
+    let nix = Vector::new(0, 0, 0);
+    for line in reader.lines() {
+        let line = line.expect("read_moons: cannot read line");
+        for cap in re.captures_iter(&line) {
+            let x:i64 = cap[1].parse().expect("read_moons: cannot read x");
+            let y:i64 = cap[2].parse().expect("read_moons: cannot read y");
+            let z:i64 = cap[3].parse().expect("read_moons: cannot read z");
+            let moon = Moon::new(Vector::new(x,y,z), nix);
+            moons.push(moon);
+        }
+    }
+
+    moons
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    let original = read_moons(args[1].clone());
+    let mut moons = original.clone();
+    let mut step = 0;
+    loop {
+        step += 1;
+        moons = simulate(&moons);
+        if step == 1000 {
+            println!("total after 1000: {}", moons.iter().fold(0i64, total_energy));
+        }
+        if original == moons {
+            println!("returned to initial after: {}", step);
+           // println!("{:?}", original);
+           // println!("{:?}", moons);
+            break;
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod test {
-    use super::{simulate, Planet, Vector};
+    use super::*;
 
     #[test]
     fn test_panets() {
         let nix = Vector::new(0, 0, 0);
-        let mut planets = vec![
-            Planet::new(Vector::new(-1, 0, 2), nix),
-            Planet::new(Vector::new(2, -10, -7), nix),
-            Planet::new(Vector::new(4, -8, 8), nix),
-            Planet::new(Vector::new(3, 5, -1), nix),
+        let mut moons = vec![
+            Moon::new(Vector::new(-1, 0, 2), nix),
+            Moon::new(Vector::new(2, -10, -7), nix),
+            Moon::new(Vector::new(4, -8, 8), nix),
+            Moon::new(Vector::new(3, 5, -1), nix),
         ];
-        planets = simulate(&planets);
-        assert_eq!(planets[0].position, Vector::new(2, -1, 1));
-        assert_eq!(planets[0].velocity, Vector::new(3, -1, -1));
+        moons = simulate(&moons);
+        assert_eq!(moons[0].position, Vector::new(2, -1, 1));
+        assert_eq!(moons[0].velocity, Vector::new(3, -1, -1));
 
-        assert_eq!(planets[1].position, Vector::new(3, -7, -4));
-        assert_eq!(planets[1].velocity, Vector::new(1, 3, 3));
+        assert_eq!(moons[1].position, Vector::new(3, -7, -4));
+        assert_eq!(moons[1].velocity, Vector::new(1, 3, 3));
 
-        assert_eq!(planets[2].position, Vector::new(1, -7, 5));
-        assert_eq!(planets[2].velocity, Vector::new(-3, 1, -3));
+        assert_eq!(moons[2].position, Vector::new(1, -7, 5));
+        assert_eq!(moons[2].velocity, Vector::new(-3, 1, -3));
 
-        assert_eq!(planets[3].position, Vector::new(2, 2, 0));
-        assert_eq!(planets[3].velocity, Vector::new(-1, -3, 1));
+        assert_eq!(moons[3].position, Vector::new(2, 2, 0));
+        assert_eq!(moons[3].velocity, Vector::new(-1, -3, 1));
+        for _ in 1..10 {
+            moons = simulate(&moons);
+        }
+
+        assert_eq!(moons[0].position, Vector::new(2, 1, -3));
+        assert_eq!(moons[0].velocity, Vector::new(-3, -2, 1));
+
+        assert_eq!(moons[1].position, Vector::new(1, -8, 0));
+        assert_eq!(moons[1].velocity, Vector::new(-1, 1, 3));
+
+        assert_eq!(moons[2].position, Vector::new(3, -6, 1));
+        assert_eq!(moons[2].velocity, Vector::new(3, 2, -3));
+
+        assert_eq!(moons[3].position, Vector::new(2, 0, 4));
+        assert_eq!(moons[3].velocity, Vector::new(1, -1, -1));
+        let total = moons.iter().fold(0i64, total_energy);
+        assert_eq!(total, 179);
     }
 }
